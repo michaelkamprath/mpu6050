@@ -1,6 +1,6 @@
 [package]
 name = "mpu6050"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["Julian Gaal <gjulian@uos.de>"]
 edition = "2018"
 
@@ -11,9 +11,9 @@ keywords = ["mpu6050", "imu", "embedded"]
 license = "MIT"
 
 [dependencies]
-embedded-hal = "0.2.4"
+embedded-hal = "0.2"
 micromath = {version = "2", features = ["vector"] }
 
 [dev-dependencies]
 i2cdev = "0.6.0"
-linux-embedded-hal = "0.3.2"
+

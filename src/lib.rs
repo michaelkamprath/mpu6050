@@ -5,7 +5,7 @@
 //! ### Misc
 //! * [Register sheet](https://www.invensense.com/wp-content/uploads/2015/02/MPU-6000-Register-Map1.pdf),
 //! * [Data sheet](https://www.invensense.com/wp-content/uploads/2015/02/MPU-6500-Datasheet2.pdf)
-//! 
+//!
 //! To use this driver you must provide a concrete `embedded_hal` implementation.
 //! This example uses `linux_embedded_hal`.
 //!
@@ -49,15 +49,19 @@
 mod bits;
 pub mod device;
 
+extern crate alloc;
+
 use crate::device::*;
 use micromath::{
     vector::{Vector2d, Vector3d},
-    F32Ext,
+    F32Ext
 };
 use embedded_hal::{
     blocking::delay::DelayMs,
     blocking::i2c::{Write, WriteRead},
 };
+use core::cell::RefCell;
+use alloc::rc::Rc;
 
 /// PI, f32
 pub const PI: f32 = core::f32::consts::PI;
@@ -77,7 +81,7 @@ pub enum Mpu6050Error<E> {
 
 /// Handles all operations on/with Mpu6050
 pub struct Mpu6050<I> {
-    i2c: I,
+    i2c: Rc<RefCell<I>>,
     slave_addr: u8,
     acc_sensitivity: f32,
     gyro_sensitivity: f32,
@@ -85,10 +89,10 @@ pub struct Mpu6050<I> {
 
 impl<I, E> Mpu6050<I>
 where
-    I: Write<Error = E> + WriteRead<Error = E>, 
+    I: Write<Error = E> + WriteRead<Error = E>,
 {
     /// Side effect free constructor with default sensitivies, no calibration
-    pub fn new(i2c: I) -> Self {
+    pub fn new(i2c: Rc<RefCell<I>>) -> Self {
         Mpu6050 {
             i2c,
             slave_addr: DEFAULT_SLAVE_ADDR,
@@ -98,7 +102,7 @@ where
     }
 
     /// custom sensitivity
-    pub fn new_with_sens(i2c: I, arange: AccelRange, grange: GyroRange) -> Self {
+    pub fn new_with_sens(i2c: Rc<RefCell<I>>, arange: AccelRange, grange: GyroRange) -> Self {
         Mpu6050 {
             i2c,
             slave_addr: DEFAULT_SLAVE_ADDR,
@@ -108,7 +112,7 @@ where
     }
 
     /// Same as `new`, but the chip address can be specified (e.g. 0x69, if the A0 pin is pulled up)
-    pub fn new_with_addr(i2c: I, slave_addr: u8) -> Self {
+    pub fn new_with_addr(i2c: Rc<RefCell<I>>, slave_addr: u8) -> Self {
         Mpu6050 {
             i2c,
             slave_addr,
@@ -118,7 +122,7 @@ where
     }
 
     /// Combination of `new_with_sens` and `new_with_addr`
-    pub fn new_with_addr_and_sens(i2c: I, slave_addr: u8, arange: AccelRange, grange: GyroRange) -> Self {
+    pub fn new_with_addr_and_sens(i2c: Rc<RefCell<I>>, slave_addr: u8, arange: AccelRange, grange: GyroRange) -> Self {
         Mpu6050 {
             i2c,
             slave_addr,
@@ -386,7 +390,7 @@ where
 
     /// Writes byte to register
     pub fn write_byte(&mut self, reg: u8, byte: u8) -> Result<(), Mpu6050Error<E>> {
-        self.i2c.write(self.slave_addr, &[reg, byte])
+        self.i2c.borrow_mut().write(self.slave_addr, &[reg, byte])
             .map_err(Mpu6050Error::I2c)?;
         // delay disabled for dev build
         // TODO: check effects with physical unit
@@ -427,14 +431,14 @@ where
     /// Reads byte from register
     pub fn read_byte(&mut self, reg: u8) -> Result<u8, Mpu6050Error<E>> {
         let mut byte: [u8; 1] = [0; 1];
-        self.i2c.write_read(self.slave_addr, &[reg], &mut byte)
+        self.i2c.borrow_mut().write_read(self.slave_addr, &[reg], &mut byte)
             .map_err(Mpu6050Error::I2c)?;
         Ok(byte[0])
     }
 
     /// Reads series of bytes into buf from specified reg
     pub fn read_bytes(&mut self, reg: u8, buf: &mut [u8]) -> Result<(), Mpu6050Error<E>> {
-        self.i2c.write_read(self.slave_addr, &[reg], buf)
+        self.i2c.borrow_mut().write_read(self.slave_addr, &[reg], buf)
             .map_err(Mpu6050Error::I2c)?;
         Ok(())
     }
