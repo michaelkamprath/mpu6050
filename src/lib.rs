@@ -58,6 +58,7 @@ use embedded_hal::{
     blocking::delay::DelayMs,
     blocking::i2c::{Write, WriteRead},
 };
+#[allow(unused_imports)]
 use micromath::{
     vector::{Vector2d, Vector3d},
     F32Ext,

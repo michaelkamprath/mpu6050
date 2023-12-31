@@ -1,16 +1,15 @@
-use mpu6050::{*, device::*};
+use mpu6050::{device::*, *};
 
-use linux_embedded_hal::{I2cdev, Delay};
 use i2cdev::linux::LinuxI2CError;
+use linux_embedded_hal::{Delay, I2cdev};
 use mpu6050::device::{ACCEL_HPF, CLKSEL};
 
 fn main() -> Result<(), Mpu6050Error<LinuxI2CError>> {
-    let i2c = I2cdev::new("/dev/i2c-1")
-        .map_err(Mpu6050Error::I2c)?;
+    let i2c = I2cdev::new("/dev/i2c-1").map_err(Mpu6050Error::I2c)?;
 
     let mut delay = Delay;
     let mut mpu = Mpu6050::new(i2c);
-    
+
     mpu.init(&mut delay)?;
 
     // Test power management

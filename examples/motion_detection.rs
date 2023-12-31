@@ -1,15 +1,14 @@
-use mpu6050::{*, device::MOT_DETECT_STATUS};
-use linux_embedded_hal::{I2cdev, Delay};
-use i2cdev::linux::LinuxI2CError;
 use embedded_hal::blocking::delay::DelayMs;
+use i2cdev::linux::LinuxI2CError;
+use linux_embedded_hal::{Delay, I2cdev};
+use mpu6050::{device::MOT_DETECT_STATUS, *};
 
 fn main() -> Result<(), Mpu6050Error<LinuxI2CError>> {
-    let i2c = I2cdev::new("/dev/i2c-1")
-        .map_err(Mpu6050Error::I2c)?;
+    let i2c = I2cdev::new("/dev/i2c-1").map_err(Mpu6050Error::I2c)?;
 
     let mut delay = Delay;
     let mut mpu = Mpu6050::new(i2c);
-    
+
     mpu.init(&mut delay)?;
     mpu.setup_motion_detection()?;
 
@@ -17,7 +16,10 @@ fn main() -> Result<(), Mpu6050Error<LinuxI2CError>> {
 
     loop {
         if mpu.get_motion_detected()? {
-            println!("YEAH BUDDY. Motion by axes: {:b}", mpu.read_byte(MOT_DETECT_STATUS::ADDR)?);
+            println!(
+                "YEAH BUDDY. Motion by axes: {:b}",
+                mpu.read_byte(MOT_DETECT_STATUS::ADDR)?
+            );
             count += 1;
         }
 
