@@ -1,6 +1,6 @@
 [package]
 name = "mpu6050"
-version = "0.1.7"
+version = "0.2.0"
 authors = ["Julian Gaal <gjulian@uos.de>"]
 edition = "2018"
 
@@ -11,7 +11,8 @@ keywords = ["mpu6050", "imu", "embedded"]
 license = "MIT"
 
 [features]
-defmt = ["dep:defmt"]
+defmt = ["dep:defmt"]   # crreatea a defmt formatter for the error type
+shared_i2c = []         # use shared i2c bus via Rc<RefCell<I2c>>
 
 [dependencies]
 embedded-hal = "0.2"
