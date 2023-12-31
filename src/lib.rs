@@ -52,16 +52,19 @@ pub mod device;
 extern crate alloc;
 
 use crate::device::*;
-use micromath::{
-    vector::{Vector2d, Vector3d},
-    F32Ext
-};
+use alloc::rc::Rc;
+use core::cell::RefCell;
 use embedded_hal::{
     blocking::delay::DelayMs,
     blocking::i2c::{Write, WriteRead},
 };
-use core::cell::RefCell;
-use alloc::rc::Rc;
+use micromath::{
+    vector::{Vector2d, Vector3d},
+    F32Ext,
+};
+
+#[cfg(feature = "defmt")]
+use defmt::Format;
 
 /// PI, f32
 pub const PI: f32 = core::f32::consts::PI;
@@ -79,12 +82,38 @@ pub enum Mpu6050Error<E> {
     InvalidChipId(u8),
 }
 
+#[cfg(feature = "defmt")]
+impl<E> Format for Mpu6050Error<E> {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            Mpu6050Error::I2c(_) => defmt::write!(f, "I2c error"),
+            Mpu6050Error::InvalidChipId(id) => defmt::write!(f, "Invalid chip ID: {}", id),
+        }
+    }
+}
+
 /// Handles all operations on/with Mpu6050
 pub struct Mpu6050<I> {
     i2c: Rc<RefCell<I>>,
     slave_addr: u8,
     acc_sensitivity: f32,
     gyro_sensitivity: f32,
+}
+
+#[cfg(feature = "defmt")]
+impl<I, E> Format for Mpu6050<I>
+where
+    I: Write<Error = E> + WriteRead<Error = E>,
+{
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(
+            f,
+            "Mpu6050< addr: {}, acc_sensitivity: {}, gyro_sensitivity: {} >",
+            self.slave_addr,
+            self.acc_sensitivity,
+            self.gyro_sensitivity
+        );
+    }
 }
 
 impl<I, E> Mpu6050<I>
@@ -122,7 +151,12 @@ where
     }
 
     /// Combination of `new_with_sens` and `new_with_addr`
-    pub fn new_with_addr_and_sens(i2c: Rc<RefCell<I>>, slave_addr: u8, arange: AccelRange, grange: GyroRange) -> Self {
+    pub fn new_with_addr_and_sens(
+        i2c: Rc<RefCell<I>>,
+        slave_addr: u8,
+        arange: AccelRange,
+        grange: GyroRange,
+    ) -> Self {
         Mpu6050 {
             i2c,
             slave_addr,
@@ -150,12 +184,21 @@ where
     /// (or  an  external  clocksource) as the clock reference for improved stability.
     /// The clock source can be selected according to the following table...."
     pub fn set_clock_source(&mut self, source: CLKSEL) -> Result<(), Mpu6050Error<E>> {
-        Ok(self.write_bits(PWR_MGMT_1::ADDR, PWR_MGMT_1::CLKSEL.bit, PWR_MGMT_1::CLKSEL.length, source as u8)?)
+        Ok(self.write_bits(
+            PWR_MGMT_1::ADDR,
+            PWR_MGMT_1::CLKSEL.bit,
+            PWR_MGMT_1::CLKSEL.length,
+            source as u8,
+        )?)
     }
 
     /// get current clock source
     pub fn get_clock_source(&mut self) -> Result<CLKSEL, Mpu6050Error<E>> {
-        let source = self.read_bits(PWR_MGMT_1::ADDR, PWR_MGMT_1::CLKSEL.bit, PWR_MGMT_1::CLKSEL.length)?;
+        let source = self.read_bits(
+            PWR_MGMT_1::ADDR,
+            PWR_MGMT_1::CLKSEL.bit,
+            PWR_MGMT_1::CLKSEL.length,
+        )?;
         Ok(CLKSEL::from(source))
     }
 
@@ -201,29 +244,33 @@ where
 
     /// set accel high pass filter mode
     pub fn set_accel_hpf(&mut self, mode: ACCEL_HPF) -> Result<(), Mpu6050Error<E>> {
-        Ok(
-            self.write_bits(ACCEL_CONFIG::ADDR,
-                            ACCEL_CONFIG::ACCEL_HPF.bit,
-                            ACCEL_CONFIG::ACCEL_HPF.length,
-                            mode as u8)?
-        )
+        Ok(self.write_bits(
+            ACCEL_CONFIG::ADDR,
+            ACCEL_CONFIG::ACCEL_HPF.bit,
+            ACCEL_CONFIG::ACCEL_HPF.length,
+            mode as u8,
+        )?)
     }
 
     /// get accel high pass filter mode
     pub fn get_accel_hpf(&mut self) -> Result<ACCEL_HPF, Mpu6050Error<E>> {
-        let mode: u8 = self.read_bits(ACCEL_CONFIG::ADDR,
-                                      ACCEL_CONFIG::ACCEL_HPF.bit,
-                                      ACCEL_CONFIG::ACCEL_HPF.length)?;
+        let mode: u8 = self.read_bits(
+            ACCEL_CONFIG::ADDR,
+            ACCEL_CONFIG::ACCEL_HPF.bit,
+            ACCEL_CONFIG::ACCEL_HPF.length,
+        )?;
 
         Ok(ACCEL_HPF::from(mode))
     }
 
     /// Set gyro range, and update sensitivity accordingly
     pub fn set_gyro_range(&mut self, range: GyroRange) -> Result<(), Mpu6050Error<E>> {
-        self.write_bits(GYRO_CONFIG::ADDR,
-                        GYRO_CONFIG::FS_SEL.bit,
-                        GYRO_CONFIG::FS_SEL.length,
-                        range as u8)?;
+        self.write_bits(
+            GYRO_CONFIG::ADDR,
+            GYRO_CONFIG::FS_SEL.bit,
+            GYRO_CONFIG::FS_SEL.length,
+            range as u8,
+        )?;
 
         self.gyro_sensitivity = range.sensitivity();
         Ok(())
@@ -231,19 +278,23 @@ where
 
     /// get current gyro range
     pub fn get_gyro_range(&mut self) -> Result<GyroRange, Mpu6050Error<E>> {
-        let byte = self.read_bits(GYRO_CONFIG::ADDR,
-                                  GYRO_CONFIG::FS_SEL.bit,
-                                  GYRO_CONFIG::FS_SEL.length)?;
+        let byte = self.read_bits(
+            GYRO_CONFIG::ADDR,
+            GYRO_CONFIG::FS_SEL.bit,
+            GYRO_CONFIG::FS_SEL.length,
+        )?;
 
         Ok(GyroRange::from(byte))
     }
 
     /// set accel range, and update sensitivy accordingly
     pub fn set_accel_range(&mut self, range: AccelRange) -> Result<(), Mpu6050Error<E>> {
-        self.write_bits(ACCEL_CONFIG::ADDR,
-                        ACCEL_CONFIG::FS_SEL.bit,
-                        ACCEL_CONFIG::FS_SEL.length,
-                        range as u8)?;
+        self.write_bits(
+            ACCEL_CONFIG::ADDR,
+            ACCEL_CONFIG::FS_SEL.bit,
+            ACCEL_CONFIG::FS_SEL.length,
+            range as u8,
+        )?;
 
         self.acc_sensitivity = range.sensitivity();
         Ok(())
@@ -251,9 +302,11 @@ where
 
     /// get current accel_range
     pub fn get_accel_range(&mut self) -> Result<AccelRange, Mpu6050Error<E>> {
-        let byte = self.read_bits(ACCEL_CONFIG::ADDR,
-                                  ACCEL_CONFIG::FS_SEL.bit,
-                                  ACCEL_CONFIG::FS_SEL.length)?;
+        let byte = self.read_bits(
+            ACCEL_CONFIG::ADDR,
+            ACCEL_CONFIG::FS_SEL.bit,
+            ACCEL_CONFIG::FS_SEL.length,
+        )?;
 
         Ok(AccelRange::from(byte))
     }
@@ -329,8 +382,8 @@ where
         Ok(Vector2d::<f32> {
             // x: atan2f(acc.y, sqrtf(powf(acc.x, 2.) + powf(acc.z, 2.))),
             // y: atan2f(-acc.x, sqrtf(powf(acc.y, 2.) + powf(acc.z, 2.)))
-            x: acc.y.atan2((acc.x.powf(2.) + acc.z.powf( 2.)).sqrt()),
-            y: (-acc.x).atan2((acc.y.powf(2.) + acc.z.powf(2.)).sqrt())
+            x: acc.y.atan2((acc.x.powf(2.) + acc.z.powf(2.)).sqrt()),
+            y: (-acc.x).atan2((acc.y.powf(2.) + acc.z.powf(2.)).sqrt()),
         })
     }
 
@@ -356,7 +409,7 @@ where
         Ok(Vector3d::<f32> {
             x: self.read_word_2c(&buf[0..2]) as f32,
             y: self.read_word_2c(&buf[2..4]) as f32,
-            z: self.read_word_2c(&buf[4..6]) as f32
+            z: self.read_word_2c(&buf[4..6]) as f32,
         })
     }
 
@@ -364,7 +417,7 @@ where
     pub fn get_acc(&mut self) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
         let mut acc = self.read_rot(ACC_REGX_H)?;
 
-        acc *= 1.0/self.acc_sensitivity;
+        acc *= 1.0 / self.acc_sensitivity;
 
         Ok(acc)
     }
@@ -390,7 +443,9 @@ where
 
     /// Writes byte to register
     pub fn write_byte(&mut self, reg: u8, byte: u8) -> Result<(), Mpu6050Error<E>> {
-        self.i2c.borrow_mut().write(self.slave_addr, &[reg, byte])
+        self.i2c
+            .borrow_mut()
+            .write(self.slave_addr, &[reg, byte])
             .map_err(Mpu6050Error::I2c)?;
         // delay disabled for dev build
         // TODO: check effects with physical unit
@@ -407,7 +462,13 @@ where
     }
 
     /// Write bits data at reg from start_bit to start_bit+length
-    pub fn write_bits(&mut self, reg: u8, start_bit: u8, length: u8, data: u8) -> Result<(), Mpu6050Error<E>> {
+    pub fn write_bits(
+        &mut self,
+        reg: u8,
+        start_bit: u8,
+        length: u8,
+        data: u8,
+    ) -> Result<(), Mpu6050Error<E>> {
         let mut byte: [u8; 1] = [0; 1];
         self.read_bytes(reg, &mut byte)?;
         bits::set_bits(&mut byte[0], start_bit, length, data);
@@ -431,16 +492,19 @@ where
     /// Reads byte from register
     pub fn read_byte(&mut self, reg: u8) -> Result<u8, Mpu6050Error<E>> {
         let mut byte: [u8; 1] = [0; 1];
-        self.i2c.borrow_mut().write_read(self.slave_addr, &[reg], &mut byte)
+        self.i2c
+            .borrow_mut()
+            .write_read(self.slave_addr, &[reg], &mut byte)
             .map_err(Mpu6050Error::I2c)?;
         Ok(byte[0])
     }
 
     /// Reads series of bytes into buf from specified reg
     pub fn read_bytes(&mut self, reg: u8, buf: &mut [u8]) -> Result<(), Mpu6050Error<E>> {
-        self.i2c.borrow_mut().write_read(self.slave_addr, &[reg], buf)
+        self.i2c
+            .borrow_mut()
+            .write_read(self.slave_addr, &[reg], buf)
             .map_err(Mpu6050Error::I2c)?;
         Ok(())
     }
 }
-

@@ -10,9 +10,13 @@ readme = "README.md"
 keywords = ["mpu6050", "imu", "embedded"]
 license = "MIT"
 
+[features]
+defmt = ["dep:defmt"]
+
 [dependencies]
 embedded-hal = "0.2"
 micromath = {version = "2", features = ["vector"] }
+defmt = { version = "0.3", optional = true }
 
 [dev-dependencies]
 i2cdev = "0.6.0"
