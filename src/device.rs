@@ -60,6 +60,14 @@ pub const DEFAULT_SLAVE_ADDR: u8 = 0x68;
 /// Internal register to check slave addr
 pub const WHOAMI: u8 = 0x75;
 
+/// High Byte Gyro X Offset Register
+pub const XG_OFFS_USRH: u8 = 0x13;
+/// High Byte Gyro Y Offset Register
+pub const YG_OFFS_USRH: u8 = 0x15;
+/// High Byte Gyro Z Offset Register
+pub const ZG_OFFS_USRH: u8 = 0x17;
+
+
 /// Describes a bit block from bit number 'bit' to 'bit'+'length'
 pub struct BitBlock {
     pub bit: u8,

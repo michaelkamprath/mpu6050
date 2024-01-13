@@ -66,7 +66,7 @@ use alloc::rc::Rc;
 #[cfg(feature = "shared_i2c")]
 use core::cell::RefCell;
 #[cfg(feature = "defmt")]
-use defmt::Format;
+use defmt::{info, Format};
 
 /// PI, f32
 pub const PI: f32 = core::f32::consts::PI;
@@ -85,10 +85,13 @@ pub enum Mpu6050Error<E> {
 }
 
 #[cfg(feature = "defmt")]
-impl<E> Format for Mpu6050Error<E> {
+impl<E> Format for Mpu6050Error<E>
+where
+    E: Format,
+{
     fn format(&self, f: defmt::Formatter) {
         match self {
-            Mpu6050Error::I2c(_) => defmt::write!(f, "I2c error"),
+            Mpu6050Error::I2c(e) => defmt::write!(f, "I2c error: {}", e),
             Mpu6050Error::InvalidChipId(id) => defmt::write!(f, "Invalid chip ID: {}", id),
         }
     }
@@ -113,7 +116,7 @@ where
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
             f,
-            "Mpu6050< addr: {}, acc_sensitivity: {}, gyro_sensitivity: {} >",
+            "Mpu6050< addr: 0x{:X}, acc_sensitivity: {}, gyro_sensitivity: {} >",
             self.slave_addr,
             self.acc_sensitivity,
             self.gyro_sensitivity
@@ -481,9 +484,18 @@ where
 
     /// Gyro readings in rad/s
     pub fn get_gyro(&mut self) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
+        let mut gyro = self.get_gyro_deg()?;
+
+        gyro *= PI_180;
+
+        Ok(gyro)
+    }
+
+    /// Gyro readings in deg/s
+    pub fn get_gyro_deg(&mut self) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
         let mut gyro = self.read_rot(GYRO_REGX_H)?;
 
-        gyro *= PI_180 / self.gyro_sensitivity;
+        gyro *= 1.0 / self.gyro_sensitivity;
 
         Ok(gyro)
     }
@@ -496,6 +508,47 @@ where
 
         // According to revision 4.2
         Ok((raw_temp / TEMP_SENSITIVITY) + TEMP_OFFSET)
+    }
+
+    /// get gyro offsets
+    pub fn get_gyro_offsets(&mut self) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
+        let mut buf: [u8; 2] = [0; 2];
+        let mut offsets: Vector3d<f32> = Vector3d::<f32>::default();
+
+        self.read_bytes(XG_OFFS_USRH, &mut buf)?;
+        offsets.x = self.read_word_2c(&buf[0..2]) as f32;
+        self.read_bytes(YG_OFFS_USRH, &mut buf)?;
+        offsets.y = self.read_word_2c(&buf[0..2]) as f32;
+        self.read_bytes(ZG_OFFS_USRH, &mut buf)?;
+        offsets.z = self.read_word_2c(&buf[0..2]) as f32;
+
+        Ok(offsets)
+    }
+
+    /// set gyro offsets
+    pub fn set_gyro_offsets(&mut self, x_offset: i16, y_offset: i16, z_offset: i16) -> Result<(), Mpu6050Error<E>> {
+        #[cfg(feature = "defmt")]
+        info!("Setting gyro offsets: x: {}, y: {}, z: {}", x_offset, y_offset, z_offset);
+        self.write_word(XG_OFFS_USRH, x_offset as u16)?;
+        self.write_word(YG_OFFS_USRH, y_offset as u16)?;
+        self.write_word(ZG_OFFS_USRH, z_offset as u16)?;
+        Ok(())
+    }
+
+    pub fn write_word(&mut self, reg: u8, word_value: u16) -> Result<(), Mpu6050Error<E>> {
+        #[cfg(not(feature = "shared_i2c"))]
+        let i2c = &mut self.i2c;
+        #[cfg(feature = "shared_i2c")]
+        let mut i2c = self.i2c.borrow_mut();
+
+        let data = [reg, (word_value >> 8) as u8, (word_value & 0x00FF) as u8];
+
+        i2c.write(self.slave_addr, &data)
+           .map_err(Mpu6050Error::I2c)?;
+        // delay disabled for dev build
+        // TODO: check effects with physical unit
+        // self.delay.delay_ms(10u8);
+        Ok(())
     }
 
     /// Writes byte to register
