@@ -61,12 +61,6 @@ use micromath::{
     vector::{Vector2d, Vector3d},
     F32Ext,
 };
-#[cfg(feature = "shared_i2c")]
-use alloc::rc::Rc;
-#[cfg(feature = "shared_i2c")]
-use core::cell::RefCell;
-#[cfg(feature = "defmt")]
-use defmt::{info, Format};
 
 /// PI, f32
 pub const PI: f32 = core::f32::consts::PI;
@@ -99,10 +93,7 @@ where
 
 /// Handles all operations on/with Mpu6050
 pub struct Mpu6050<I> {
-    #[cfg(not(feature = "shared_i2c"))]
     i2c: I,
-    #[cfg(feature = "shared_i2c")]
-    i2c: Rc<RefCell<I>>,
     slave_addr: u8,
     acc_sensitivity: f32,
     gyro_sensitivity: f32,
@@ -129,7 +120,6 @@ where
     I: Write<Error = E> + WriteRead<Error = E>,
 {
     /// Side effect free constructor with default sensitivies, no calibration
-    #[cfg(not(feature = "shared_i2c"))]
     pub fn new(i2c: I) -> Self {
         Mpu6050 {
             i2c,
@@ -139,30 +129,8 @@ where
         }
     }
 
-    /// Side effect free constructor with default sensitivies, no calibration
-    #[cfg(feature = "shared_i2c")]
-    pub fn new(i2c: Rc<RefCell<I>>) -> Self {
-        Mpu6050 {
-            i2c,
-            slave_addr: DEFAULT_SLAVE_ADDR,
-            acc_sensitivity: ACCEL_SENS.0,
-            gyro_sensitivity: GYRO_SENS.0,
-        }
-    }
-
     /// custom sensitivity
-    #[cfg(not(feature = "shared_i2c"))]
     pub fn new_with_sens(i2c: I, arange: AccelRange, grange: GyroRange) -> Self {
-        Mpu6050 {
-            i2c,
-            slave_addr: DEFAULT_SLAVE_ADDR,
-            acc_sensitivity: arange.sensitivity(),
-            gyro_sensitivity: grange.sensitivity(),
-        }
-    }
-    /// custom sensitivity
-    #[cfg(feature = "shared_i2c")]
-    pub fn new_with_sens(i2c: Rc<RefCell<I>>, arange: AccelRange, grange: GyroRange) -> Self {
         Mpu6050 {
             i2c,
             slave_addr: DEFAULT_SLAVE_ADDR,
@@ -172,7 +140,6 @@ where
     }
 
     /// Same as `new`, but the chip address can be specified (e.g. 0x69, if the A0 pin is pulled up)
-    #[cfg(not(feature = "shared_i2c"))]
     pub fn new_with_addr(i2c: I, slave_addr: u8) -> Self {
         Mpu6050 {
             i2c,
@@ -182,37 +149,9 @@ where
         }
     }
 
-    /// Same as `new`, but the chip address can be specified (e.g. 0x69, if the A0 pin is pulled up)
-    #[cfg(feature = "shared_i2c")]
-    pub fn new_with_addr(i2c: Rc<RefCell<I>>, slave_addr: u8) -> Self {
-        Mpu6050 {
-            i2c,
-            slave_addr,
-            acc_sensitivity: ACCEL_SENS.0,
-            gyro_sensitivity: GYRO_SENS.0,
-        }
-    }
-
     /// Combination of `new_with_sens` and `new_with_addr`
-    #[cfg(not(feature = "shared_i2c"))]
     pub fn new_with_addr_and_sens(
         i2c: I,
-        slave_addr: u8,
-        arange: AccelRange,
-        grange: GyroRange,
-    ) -> Self {
-        Mpu6050 {
-            i2c,
-            slave_addr,
-            acc_sensitivity: arange.sensitivity(),
-            gyro_sensitivity: grange.sensitivity(),
-        }
-    }
-
-    /// Combination of `new_with_sens` and `new_with_addr`
-    #[cfg(feature = "shared_i2c")]
-    pub fn new_with_addr_and_sens(
-        i2c: Rc<RefCell<I>>,
         slave_addr: u8,
         arange: AccelRange,
         grange: GyroRange,
@@ -536,14 +475,8 @@ where
     }
 
     pub fn write_word(&mut self, reg: u8, word_value: u16) -> Result<(), Mpu6050Error<E>> {
-        #[cfg(not(feature = "shared_i2c"))]
-        let i2c = &mut self.i2c;
-        #[cfg(feature = "shared_i2c")]
-        let mut i2c = self.i2c.borrow_mut();
-
         let data = [reg, (word_value >> 8) as u8, (word_value & 0x00FF) as u8];
-
-        i2c.write(self.slave_addr, &data)
+        self.i2c.write(self.slave_addr, &data)
            .map_err(Mpu6050Error::I2c)?;
         // delay disabled for dev build
         // TODO: check effects with physical unit
@@ -553,12 +486,7 @@ where
 
     /// Writes byte to register
     pub fn write_byte(&mut self, reg: u8, byte: u8) -> Result<(), Mpu6050Error<E>> {
-        #[cfg(not(feature = "shared_i2c"))]
-        let i2c = &mut self.i2c;
-        #[cfg(feature = "shared_i2c")]
-        let mut i2c = self.i2c.borrow_mut();
-
-        i2c.write(self.slave_addr, &[reg, byte])
+        self.i2c.write(self.slave_addr, &[reg, byte])
            .map_err(Mpu6050Error::I2c)?;
         // delay disabled for dev build
         // TODO: check effects with physical unit
@@ -605,23 +533,14 @@ where
     /// Reads byte from register
     pub fn read_byte(&mut self, reg: u8) -> Result<u8, Mpu6050Error<E>> {
         let mut byte: [u8; 1] = [0; 1];
-
-        #[cfg(not(feature = "shared_i2c"))]
-        let i2c = &mut self.i2c;
-        #[cfg(feature = "shared_i2c")]
-        let mut i2c = self.i2c.borrow_mut();
-        i2c.write_read(self.slave_addr, &[reg], &mut byte)
+        self.i2c.write_read(self.slave_addr, &[reg], &mut byte)
             .map_err(Mpu6050Error::I2c)?;
         Ok(byte[0])
     }
 
     /// Reads series of bytes into buf from specified reg
     pub fn read_bytes(&mut self, reg: u8, buf: &mut [u8]) -> Result<(), Mpu6050Error<E>> {
-        #[cfg(not(feature = "shared_i2c"))]
-        let i2c = &mut self.i2c;
-        #[cfg(feature = "shared_i2c")]
-        let mut i2c = self.i2c.borrow_mut();
-        i2c.write_read(self.slave_addr, &[reg], buf)
+        self.i2c.write_read(self.slave_addr, &[reg], buf)
             .map_err(Mpu6050Error::I2c)?;
         Ok(())
     }

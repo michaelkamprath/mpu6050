@@ -11,8 +11,7 @@ keywords = ["mpu6050", "imu", "embedded"]
 license = "MIT"
 
 [features]
-defmt = ["dep:defmt"]   # crreatea a defmt formatter for the error type
-shared_i2c = []         # use shared i2c bus via Rc<RefCell<I2c>>
+defmt = ["dep:defmt"]   # creates a defmt formatter for the error type
 
 [dependencies]
 embedded-hal = "0.2"
