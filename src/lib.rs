@@ -61,6 +61,8 @@ use micromath::{
     vector::{Vector2d, Vector3d},
     F32Ext,
 };
+#[cfg(feature = "defmt")]
+use defmt::{Format, info};
 
 /// PI, f32
 pub const PI: f32 = core::f32::consts::PI;
