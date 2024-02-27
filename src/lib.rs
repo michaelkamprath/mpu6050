@@ -62,7 +62,7 @@ use micromath::{
     F32Ext,
 };
 #[cfg(feature = "defmt")]
-use defmt::{Format, info};
+use defmt::{Format, info, debug};
 
 /// PI, f32
 pub const PI: f32 = core::f32::consts::PI;
@@ -402,15 +402,26 @@ where
         word
     }
 
-    /// Reads rotation (gyro/acc) from specified register
-    fn read_rot(&mut self, reg: u8) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
+    /// Reads rotation (gyro/acc) from specified register returning as Vector3s<i32>
+    fn read_rot_i32(&mut self, reg: u8) -> Result<Vector3d::<i32>, Mpu6050Error<E>> {
         let mut buf: [u8; 6] = [0; 6];
         self.read_bytes(reg, &mut buf)?;
 
+        Ok(Vector3d::<i32> {
+            x: self.read_word_2c(&buf[0..2]),  // x
+            y: self.read_word_2c(&buf[2..4]),  // y
+            z: self.read_word_2c(&buf[4..6]),  // z
+        })
+    }
+
+    /// Reads rotation (gyro/acc) from specified register
+    fn read_rot(&mut self, reg: u8) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
+        // convert i32 to Vector3d<f32>
+        let i32vec = self.read_rot_i32(reg)?;
         Ok(Vector3d::<f32> {
-            x: self.read_word_2c(&buf[0..2]) as f32,
-            y: self.read_word_2c(&buf[2..4]) as f32,
-            z: self.read_word_2c(&buf[4..6]) as f32,
+            x: i32vec.x as f32,
+            y: i32vec.y as f32,
+            z: i32vec.z as f32,
         })
     }
 
@@ -452,16 +463,16 @@ where
     }
 
     /// get gyro offsets
-    pub fn get_gyro_offsets(&mut self) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
+    pub fn get_gyro_offsets(&mut self) -> Result<Vector3d<i32>, Mpu6050Error<E>> {
         let mut buf: [u8; 2] = [0; 2];
-        let mut offsets: Vector3d<f32> = Vector3d::<f32>::default();
+        let mut offsets: Vector3d<i32> = Vector3d::<i32>::default();
 
         self.read_bytes(XG_OFFS_USRH, &mut buf)?;
-        offsets.x = self.read_word_2c(&buf[0..2]) as f32;
+        offsets.x = self.read_word_2c(&buf[0..2]);
         self.read_bytes(YG_OFFS_USRH, &mut buf)?;
-        offsets.y = self.read_word_2c(&buf[0..2]) as f32;
+        offsets.y = self.read_word_2c(&buf[0..2]);
         self.read_bytes(ZG_OFFS_USRH, &mut buf)?;
-        offsets.z = self.read_word_2c(&buf[0..2]) as f32;
+        offsets.z = self.read_word_2c(&buf[0..2]);
 
         Ok(offsets)
     }
@@ -469,11 +480,92 @@ where
     /// set gyro offsets
     pub fn set_gyro_offsets(&mut self, x_offset: i16, y_offset: i16, z_offset: i16) -> Result<(), Mpu6050Error<E>> {
         #[cfg(feature = "defmt")]
-        info!("Setting gyro offsets: x: {}, y: {}, z: {}", x_offset, y_offset, z_offset);
+        debug!("Setting gyro offsets: x: {}, y: {}, z: {}", x_offset, y_offset, z_offset);
         self.write_word(XG_OFFS_USRH, x_offset as u16)?;
         self.write_word(YG_OFFS_USRH, y_offset as u16)?;
         self.write_word(ZG_OFFS_USRH, z_offset as u16)?;
         Ok(())
+    }
+
+    /// Calibrate gyro and update offsets
+    /// To calibrate the gyro, the sensor must be stationary. The sensor should be placed on a flat, level surface. The gyro offset is the average of the readings.
+    pub fn calibrate_gyro<D: DelayMs<u8>, F: FnMut(usize)>(&mut self, delay: &mut D, mut callback: F) -> Result<(), Mpu6050Error<E>> {
+        const MAX_CALIBRATION_STEPS: usize = 20;
+        // the measurement mean is in raw units (Count)/°/s. The target is to get it as close to 0 as possible, but it is not possible to get it to 0.
+        // we will aim for getting withing 1.5 counts/°/s to 0. For a 250°/s range, this is ~0.011 °/s error
+        const TARGET_MAX_MEASUREMENT_MEAN: f32 = 1.5;
+
+        #[cfg(feature = "defmt")]
+        info!("Calibrating gyro");
+
+        // first set current offsets to 0
+        self.set_gyro_offsets(0, 0, 0)?;
+
+        let mut offsets_found = false;
+        let mut calibration_step: usize = 0;
+        while !offsets_found && calibration_step < MAX_CALIBRATION_STEPS {
+            // get mean gyro readings
+            let mean = self.calibrate_gyro_mean_sensor(delay)?;
+
+            // calculate new offsets. To converge on the right offsets, we take the current offset
+            // and substract the the mean/4. This is repeated until the mean is close to 0 or we
+            // reach 20 iterations
+            let offsets = self.get_gyro_offsets()?;
+            let mut updated_offsets = offsets.clone();
+            if mean.x.abs() > TARGET_MAX_MEASUREMENT_MEAN {
+                updated_offsets.x = offsets.x - (mean.x.signum()*f32::max(mean.x.abs()/4.0, 1.0)) as i32;
+            }
+            if mean.y.abs() > TARGET_MAX_MEASUREMENT_MEAN {
+                updated_offsets.y = offsets.y - (mean.y.signum()*f32::max(mean.y.abs()/4.0, 1.0)) as i32;
+            }
+            if mean.z.abs() > TARGET_MAX_MEASUREMENT_MEAN {
+                updated_offsets.z = offsets.z - (mean.z.signum()*f32::max(mean.z.abs()/4.0, 1.0)) as i32;
+            }
+            self.set_gyro_offsets(
+                updated_offsets.x as i16,
+                updated_offsets.y as i16,
+                updated_offsets.z as i16,
+            )?;
+
+            #[cfg(feature = "defmt")]
+            info!(
+                "Calibration step: {}\n  Mean: x = {}, y  = {}, z = {}\n  Found Offsets: x = {}, y  = {}, z = {}",
+                calibration_step, mean.x, mean.y, mean.z, updated_offsets.x, updated_offsets.y, updated_offsets.z
+            );
+            // callback is any
+            callback(calibration_step);
+
+            // determine if we are done
+            if mean.x.abs() < TARGET_MAX_MEASUREMENT_MEAN && mean.y.abs() < TARGET_MAX_MEASUREMENT_MEAN && mean.z.abs() < TARGET_MAX_MEASUREMENT_MEAN {
+                offsets_found = true;
+            }
+            calibration_step += 1;
+        }
+
+        Ok(())
+    }
+
+    fn calibrate_gyro_mean_sensor<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
+        const MEASURMENT_COUNT: i32 = 1000;
+        let mut sum: Vector3d<i32> = Vector3d::<i32>::default();
+
+        // discard first 100 readings
+        for _ in 0..100 {
+            let _ = self.read_rot_i32(GYRO_REGX_H)?;
+            delay.delay_ms(2u8);
+        }
+        for _ in 0..MEASURMENT_COUNT {
+            let gyro = self.read_rot_i32(GYRO_REGX_H)?;
+
+            sum += gyro;
+            delay.delay_ms(2u8);
+        }
+        let mean = Vector3d::<f32> {
+            x: sum.x as f32 / MEASURMENT_COUNT as f32,
+            y: sum.y as f32 / MEASURMENT_COUNT as f32,
+            z: sum.z as f32 / MEASURMENT_COUNT as f32,
+        };
+        Ok(mean)
     }
 
     pub fn write_word(&mut self, reg: u8, word_value: u16) -> Result<(), Mpu6050Error<E>> {
