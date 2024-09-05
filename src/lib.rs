@@ -53,8 +53,8 @@ extern crate alloc;
 
 use crate::device::*;
 use embedded_hal::{
-    blocking::delay::DelayMs,
-    blocking::i2c::{Write, WriteRead},
+    delay::DelayNs,
+    i2c::I2c,
 };
 #[allow(unused_imports)]
 use micromath::{
@@ -99,12 +99,14 @@ pub struct Mpu6050<I> {
     slave_addr: u8,
     acc_sensitivity: f32,
     gyro_sensitivity: f32,
+    gyro_fine_tune_offsets: Vector3d<i32>,
 }
 
 #[cfg(feature = "defmt")]
 impl<I, E> Format for Mpu6050<I>
 where
-    I: Write<Error = E> + WriteRead<Error = E>,
+    I: I2c<Error = E>,
+    E: embedded_hal::i2c::ErrorType,
 {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
@@ -119,7 +121,7 @@ where
 
 impl<I, E> Mpu6050<I>
 where
-    I: Write<Error = E> + WriteRead<Error = E>,
+    I: I2c<Error = E>,
 {
     /// Side effect free constructor with default sensitivies, no calibration
     pub fn new(i2c: I) -> Self {
@@ -128,6 +130,7 @@ where
             slave_addr: DEFAULT_SLAVE_ADDR,
             acc_sensitivity: ACCEL_SENS.0,
             gyro_sensitivity: GYRO_SENS.0,
+            gyro_fine_tune_offsets: Vector3d::<i32>::default(),
         }
     }
 
@@ -138,6 +141,7 @@ where
             slave_addr: DEFAULT_SLAVE_ADDR,
             acc_sensitivity: arange.sensitivity(),
             gyro_sensitivity: grange.sensitivity(),
+            gyro_fine_tune_offsets: Vector3d::<i32>::default(),
         }
     }
 
@@ -148,6 +152,7 @@ where
             slave_addr,
             acc_sensitivity: ACCEL_SENS.0,
             gyro_sensitivity: GYRO_SENS.0,
+            gyro_fine_tune_offsets: Vector3d::<i32>::default(),
         }
     }
 
@@ -163,15 +168,16 @@ where
             slave_addr,
             acc_sensitivity: arange.sensitivity(),
             gyro_sensitivity: grange.sensitivity(),
+            gyro_fine_tune_offsets: Vector3d::<i32>::default(),
         }
     }
 
     /// Wakes MPU6050 with all sensors enabled (default)
-    fn wake<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<(), Mpu6050Error<E>> {
+    fn wake<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Mpu6050Error<E>> {
         // MPU6050 has sleep enabled by default -> set bit 0 to wake
         // Set clock source to be PLL with x-axis gyroscope reference, bits 2:0 = 001 (See Register Map )
         self.write_byte(PWR_MGMT_1::ADDR, 0x01)?;
-        delay.delay_ms(100u8);
+        delay.delay_ms(100u32);
         Ok(())
     }
 
@@ -204,7 +210,7 @@ where
     }
 
     /// Init wakes MPU6050 and verifies register addr, e.g. in i2c
-    pub fn init<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<(), Mpu6050Error<E>> {
+    pub fn init<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Mpu6050Error<E>> {
         self.wake(delay)?;
         self.verify()?;
         self.set_accel_range(AccelRange::G2)?;
@@ -313,9 +319,9 @@ where
     }
 
     /// reset device
-    pub fn reset_device<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<(), Mpu6050Error<E>> {
+    pub fn reset_device<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Mpu6050Error<E>> {
         self.write_bit(PWR_MGMT_1::ADDR, PWR_MGMT_1::DEVICE_RESET, true)?;
-        delay.delay_ms(100u8);
+        delay.delay_ms(100u32);
         // Note: Reset sets sleep to true! Section register map: resets PWR_MGMT to 0x40
         Ok(())
     }
@@ -408,9 +414,9 @@ where
         self.read_bytes(reg, &mut buf)?;
 
         Ok(Vector3d::<i32> {
-            x: self.read_word_2c(&buf[0..2]),  // x
-            y: self.read_word_2c(&buf[2..4]),  // y
-            z: self.read_word_2c(&buf[4..6]),  // z
+            x: self.read_word_2c(&buf[0..2]) + self.gyro_fine_tune_offsets.x,  // x
+            y: self.read_word_2c(&buf[2..4]) + self.gyro_fine_tune_offsets.y,  // y
+            z: self.read_word_2c(&buf[4..6]) + self.gyro_fine_tune_offsets.z,  // z
         })
     }
 
@@ -488,8 +494,8 @@ where
     }
 
     /// Calibrate gyro and update offsets
-    /// To calibrate the gyro, the sensor must be stationary. The sensor should be placed on a flat, level surface. The gyro offset is the average of the readings.
-    pub fn calibrate_gyro<D: DelayMs<u8>, F: FnMut(usize)>(&mut self, delay: &mut D, mut callback: F) -> Result<(), Mpu6050Error<E>> {
+    /// To calibrate the gyro, the sensor must be stationary and level. The sensor should be placed on a flat, level surface.
+    pub fn calibrate_gyro<D: DelayNs, F: FnMut(usize)>(&mut self, delay: &mut D, mut callback: F) -> Result<(), Mpu6050Error<E>> {
         const MAX_CALIBRATION_STEPS: usize = 20;
         // the measurement mean is in raw units (Count)/°/s. The target is to get it as close to 0 as possible, but it is not possible to get it to 0.
         // we will aim for getting withing 1.5 counts/°/s to 0. For a 250°/s range, this is ~0.011 °/s error
@@ -500,6 +506,7 @@ where
 
         // first set current offsets to 0
         self.set_gyro_offsets(0, 0, 0)?;
+        self.gyro_fine_tune_offsets = Vector3d::<i32>::default();
 
         let mut offsets_found = false;
         let mut calibration_step: usize = 0;
@@ -538,6 +545,19 @@ where
             // determine if we are done
             if mean.x.abs() < TARGET_MAX_MEASUREMENT_MEAN && mean.y.abs() < TARGET_MAX_MEASUREMENT_MEAN && mean.z.abs() < TARGET_MAX_MEASUREMENT_MEAN {
                 offsets_found = true;
+                // the mean values we still get here are the error in the sensor. We can use this to fine tune the sensor beyond the
+                // offsets we found.
+                self.gyro_fine_tune_offsets =  Vector3d::<i32> {
+                    x: -mean.x as i32,
+                    y: -mean.y as i32,
+                    z: -mean.z as i32,
+                };
+
+                #[cfg(feature = "defmt")]
+                info!(
+                    "Calibration done. Fine tune offsets: x = {}, y  = {}, z = {}",
+                    self.gyro_fine_tune_offsets.x, self.gyro_fine_tune_offsets.y, self.gyro_fine_tune_offsets.z
+                );
             }
             calibration_step += 1;
         }
@@ -545,20 +565,20 @@ where
         Ok(())
     }
 
-    fn calibrate_gyro_mean_sensor<D: DelayMs<u8>>(&mut self, delay: &mut D) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
+    fn calibrate_gyro_mean_sensor<D: DelayNs>(&mut self, delay: &mut D) -> Result<Vector3d<f32>, Mpu6050Error<E>> {
         const MEASURMENT_COUNT: i32 = 1000;
         let mut sum: Vector3d<i32> = Vector3d::<i32>::default();
 
         // discard first 100 readings
         for _ in 0..100 {
             let _ = self.read_rot_i32(GYRO_REGX_H)?;
-            delay.delay_ms(2u8);
+            delay.delay_ms(2u32);
         }
         for _ in 0..MEASURMENT_COUNT {
             let gyro = self.read_rot_i32(GYRO_REGX_H)?;
 
             sum += gyro;
-            delay.delay_ms(2u8);
+            delay.delay_ms(2u32);
         }
         let mean = Vector3d::<f32> {
             x: sum.x as f32 / MEASURMENT_COUNT as f32,

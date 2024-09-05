@@ -14,7 +14,7 @@ license = "MIT"
 defmt = ["dep:defmt"]   # creates a defmt formatter for the error type
 
 [dependencies]
-embedded-hal = "0.2"
+embedded-hal = "1.0"
 micromath = {version = "2", features = ["vector"] }
 defmt = { version = "0.3", optional = true }
 
