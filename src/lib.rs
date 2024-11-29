@@ -106,7 +106,6 @@ pub struct Mpu6050<I> {
 impl<I, E> Format for Mpu6050<I>
 where
     I: I2c<Error = E>,
-    E: embedded_hal::i2c::ErrorType,
 {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
